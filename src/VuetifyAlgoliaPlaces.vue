@@ -1,17 +1,17 @@
 <template>
   <v-autocomplete
-    v-model="place"
+    :value="value"
     v-bind="$attrs"
     :items="places"
     :loading="loading"
     :search-input.sync="query"
-    :filter="filter"
     return-object
     item-text="value"
     :append-icon="appendIcon"
     v-on="$listeners"
-    @input="onInput"
+    @input="$emit('input', $event)"
     @click:clear="onClear"
+    @change="query = ''"
   >
     <template slot="item" slot-scope="data">
       <template v-if="typeof data.item !== 'object'">
@@ -38,11 +38,12 @@ export default {
   name: 'VuetifyAlgoliaPlaces',
   props: {
     value: {
-      type: [Object, String],
-      required: false,
-      default() {
-        return {};
-      },
+      type: [Object, Array],
+      default: () => ({}),
+    },
+    searchInput: {
+      type: String,
+      default: '',
     },
     type: {
       type: String,
@@ -81,9 +82,9 @@ export default {
     },
     customHighlight: {
       type: Function,
-      default: initialHighlight => {
+      default: (initialHighlight) => {
         const highlight = Object.assign({}, initialHighlight); // eslint-disable-line
-        const replace = value => (value || '').replace(/<em>/g, '<b>').replace(/<\/em>/g, '</b>');
+        const replace = (value) => (value || '').replace(/<em>/g, '<b>').replace(/<\/em>/g, '</b>');
 
         Object.entries(highlight).forEach(([key, value]) => {
           highlight[key] = replace(value);
@@ -105,22 +106,20 @@ export default {
     },
   },
   data() {
-    // The initial value can be a string or an object
-    // eslint-disable-next-line no-nested-ternary
-    const initialValue = this.value ? (typeof this.value === 'string' ? this.value : this.value.value) : null;
-    const initialPlace = { value: initialValue };
-
     return {
       loading: false,
-      query: initialValue,
-      place: initialPlace,
-      places: initialValue ? [initialPlace] : [],
-      filter() {
-        return true; // display all items, Algolia Places is already doing the work
-      },
+      places: [],
     };
   },
   computed: {
+    query: {
+      get() {
+        return this.searchInput;
+      },
+      set(value) {
+        this.$emit('update:search-input', value);
+      },
+    },
     searchOptions() {
       const searchOptions = { query: this.query };
 
@@ -133,7 +132,7 @@ export default {
         searchOptions.language = language;
       }
 
-      const countries = this.countries.map(country => country.toLowerCase());
+      const countries = this.countries.map((country) => country.toLowerCase());
       if (countries.length > 0) {
         searchOptions.countries = countries;
       }
@@ -175,9 +174,8 @@ export default {
       deep: true,
       handler(newVal, oldVal) {
         if (newVal.query !== null && newVal.query === oldVal.query) {
-          this.debouncedSearchPlaces(place => {
-            this.place = place;
-            this.onInput();
+          this.debouncedSearchPlaces((place) => {
+            this.$emit('input', place);
           });
         }
       },
@@ -187,9 +185,8 @@ export default {
     this.initAlgoliaPlaces();
 
     if (this.query !== null) {
-      this.searchPlaces(place => {
-        this.place = place;
-        this.onInput();
+      this.searchPlaces((place) => {
+        this.$emit('input', place);
       });
     }
   },
@@ -203,8 +200,7 @@ export default {
       this.loading = true;
       this.placesClient
         .search(this.searchOptions)
-        .then(content => {
-          this.loading = false;
+        .then((content) => {
           this.places = content.hits
             .map((hit, hitIndex) =>
               formatHit({
@@ -213,27 +209,26 @@ export default {
                 hitIndex,
                 query: this.query,
                 rawAnswer: content,
-              })
+              }),
             )
             // formatHit() reforms Algolia's _highlightResult object into a highlight prop in the root of each item.
             // Making a second pass to apply the highlight function to each array item should have a negligible
             // performance difference, since the highlight function was originally being called in a v-for in the template
-            .map(p => ({ ...p, highlight: this.customHighlight(p.highlight) }));
+            .map((p) => ({ ...p, highlight: this.customHighlight(p.highlight) }));
 
           if (typeof this.places[0] === 'object') {
             callback(this.places[0]);
           }
         })
-        .catch(error => {
-          this.loading = false;
+        .catch((error) => {
           this.$emit('error', error);
+        })
+        .finally(() => {
+          this.loading = false;
         });
     },
     debouncedSearchPlaces(callback = () => {}) {
       return this.searchPlaces(callback);
-    },
-    onInput() {
-      this.$emit('input', this.place);
     },
     onClear() {
       this.$emit('input', null);
